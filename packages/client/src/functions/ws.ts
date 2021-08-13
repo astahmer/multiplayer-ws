@@ -2,9 +2,14 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export const encode = <Payload>(payload: Payload) => encoder.encode(JSON.stringify(payload));
-export const decode = async <Payload = any>(payload: ArrayBuffer | string): Promise<Payload> => {
+export const decode = async <Payload = any>(payload: Blob | ArrayBuffer | string): Promise<Payload> => {
     try {
-        const data = payload instanceof ArrayBuffer ? decoder.decode(payload) : payload;
+        const data =
+            payload instanceof Blob
+                ? await payload.text()
+                : payload instanceof ArrayBuffer
+                ? decoder.decode(payload)
+                : payload;
         return JSON.parse(data);
     } catch (err) {
         return null as any;

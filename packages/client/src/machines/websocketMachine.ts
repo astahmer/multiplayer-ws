@@ -147,7 +147,6 @@ export function emit<Data = unknown, Event = unknown>({
 }) {
     // Do not include a ",null" if data is undefined/null
     const payload = [event, data].filter((v) => v != null);
-    // TODO [event, from: SocketId from nanoid/getRandomString, data?: optional]
     const msg = ctx.options.isBinary ? encode(payload) : JSON.stringify(payload);
 
     sendMsg(ctx.socket, msg);
@@ -157,10 +156,15 @@ async function onMessage({
     event: msgEvent,
     ctx,
 }: {
-    event: MessageEvent<ArrayBuffer | string>;
+    event: MessageEvent<Blob | ArrayBuffer | string>;
     ctx: WebSocketMachineContext;
 }) {
-    const length = msgEvent.data instanceof ArrayBuffer ? msgEvent.data.byteLength : msgEvent.data.length;
+    const length =
+        msgEvent.data instanceof Blob
+            ? msgEvent.data.size
+            : msgEvent.data instanceof ArrayBuffer
+            ? msgEvent.data.byteLength
+            : msgEvent.data.length;
     // Most likely a "pong" response from our "ping" message
     if (!length) return;
 
