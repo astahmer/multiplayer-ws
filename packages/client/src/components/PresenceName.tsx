@@ -15,7 +15,12 @@ export const PresenceName = () => {
 
     return (
         <Stack direction="row">
-            <EditableName inputRef={ref} defaultValue={presence.username || "guest"} onSubmit={updateName} />
+            <EditableName
+                inputRef={ref}
+                defaultValue={presence.username || "guest"}
+                onSubmit={updateName}
+                fontWeight="bold"
+            />
             <chakra.span fontSize="xx-small">({presence.id})</chakra.span>
         </Stack>
     );

@@ -1,4 +1,4 @@
-import { getRandomString, Primitive, wait } from "@pastable/core";
+import { getRandomString, ObjectLiteral, Primitive, safeJSONParse, wait } from "@pastable/core";
 import fastify from "fastify";
 import http from "http";
 import { URL } from "url";
@@ -16,8 +16,13 @@ export const makeApp = () => {
     return app;
 };
 
-const makeRoom = (name: string): Room => ({ name, clients: new Set(), state: new Map() });
-const makeGameRoom = (name: string, tickRate = 100): GameRoom => ({ ...makeRoom(name), tickRate, meta: new Map() });
+const makeUser = (): User => ({ clients: new Set(), rooms: new Set() });
+const makeRoom = ({ name, state }: { name: string; state?: ObjectLiteral }): Room => ({
+    name,
+    clients: new Set(),
+    state: new Map(Object.entries(state || {})),
+});
+const makeGameRoom = (name: string, tickRate = 100): GameRoom => ({ ...makeRoom({ name }), tickRate, meta: new Map() });
 const getClients = (clients: Set<AppWebsocket>) =>
     Array.from(clients.values()).filter((client) => client.readyState === WebSocket.OPEN);
 const getClientState = (ws: AppWebsocket) => ({
@@ -28,23 +33,47 @@ const getClientMeta = (ws: AppWebsocket) => ({
     id: (ws as AppWebsocket).id,
     ...Object.fromEntries(Array.from((ws as AppWebsocket).meta.entries())),
 });
+const getRoomState = (room: Room) => ({
+    ...room,
+    clients: Array.from(room.clients).map(getClientState),
+    state: Object.fromEntries(room.state),
+});
 
+// TODO permissions/roles
 type GlobalSubscription = "presence" | "rooms" | "games";
+
+interface User {
+    clients: Set<AppWebsocket>;
+    rooms: Set<Room>;
+}
 
 export const makeWsRelay = (options: WebSocket.ServerOptions) => {
     const wss = new WebSocket.Server(options);
+
+    // States
     const rooms = new Map<Room["name"], Room>();
     const games = new Map<Room["name"], GameRoom>();
+    const users = new Map<AppWebsocket["id"], User>();
+    const userIds = new Set();
+    let userCounts = 0; // auto-increment on connection
+
+    // States metadata
     const tickIntervals = new WeakMap();
     const globalSubscriptions = new Map<GlobalSubscription, Set<AppWebsocket>>([
         ["presence", new Set()],
         ["rooms", new Set()],
         ["games", new Set()],
     ]);
-    const socketIds = new Set();
-    const getId = (givenId: string) =>
-        givenId ? (socketIds.has(givenId) ? getRandomString(11) : givenId) : getRandomString(11);
-    let count = 0;
+
+    const getUserId = (givenId: string) =>
+        givenId ? (userIds.has(givenId) ? getRandomString(11) : givenId) : getRandomString(11);
+    const getUser = (id: AppWebsocket["id"]) => {
+        if (!users.has(id)) {
+            users.set(id, makeUser());
+        }
+
+        return users.get(id);
+    };
 
     const getAllClients = () => getClients(wss.clients as Set<AppWebsocket>);
     const getPresenceList = () => getAllClients().map(getClientState);
@@ -63,16 +92,14 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 .forEach((client) => sendMsg(client, ["presence/list", getPresenceList()]));
 
         const broadcastSub = (sub: GlobalSubscription, [event, payload]: WsEventPayload) =>
-            globalSubscriptions
-                .get(sub)
-                .forEach((client) => client !== ws && sendMsg(client, [event.replace(".", "/"), payload]));
+            globalSubscriptions.get(sub).forEach((client) => sendMsg(client, [event.replace(".", "/"), payload]));
         const broadcastEvent = (room: Room, event: string, payload?: any) =>
             room.clients.forEach((client) => sendMsg(client, [event.replace(".", "/"), payload]));
         const sendPresenceList = () => sendMsg(ws, ["presence/list", getAllClients().map(getClientState)]);
 
         const getRoomListEvent = () =>
             [
-                "room/list",
+                "rooms/list",
                 Array.from(rooms.entries()).map(([name, room]) => ({
                     name,
                     clients: getClients(room.clients).map((ws) => ws.id),
@@ -82,7 +109,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
 
         const getGameRoomListEvent = () =>
             [
-                "game/list",
+                "games/list",
                 Array.from(games.entries()).map(([name, room]) => ({
                     name,
                     clients: getClients(room.clients).map((ws) => ws.id),
@@ -93,18 +120,20 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
         const url = makeUrl(req);
         const givenId = url.searchParams.get("id");
         ws.isAlive = true;
-        ws.id = getId(givenId);
-        socketIds.add(ws.id);
+        ws.id = getUserId(givenId);
+        userIds.add(ws.id);
+
+        const user = getUser(ws.id);
+        user.clients.add(ws);
 
         ws.state = new Map(
             Object.entries({
-                username: url.searchParams.get("username") || "Guest" + ++count,
+                username: url.searchParams.get("username") || "Guest" + ++userCounts,
                 color: url.searchParams.get("color") || getRandomColor(),
             })
         );
         ws.meta = new Map(Object.entries({ cursor: null }));
         ws.internal = new Map(Object.entries({ intervals: new Set() }));
-        // TODO ws.internal state
         sendMsg(ws, ["presence/update", getClientState(ws)]);
 
         ws.on("pong", () => (ws.isAlive = true));
@@ -113,7 +142,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
             const userIntervals = ws.internal.get("intervals") as Set<NodeJS.Timer>;
             userIntervals.forEach((timer) => clearInterval(timer));
             userIntervals.clear();
-            socketIds.delete(ws.id);
+            userIds.delete(ws.id);
         });
 
         broadcastPresenceList();
@@ -126,12 +155,12 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
             if (!event) return;
 
             const opts = { binary: false };
-            console.log(message);
+            console.log(">", message);
 
             if (["relay", "broadcast"].includes(event)) {
-                wss.clients.forEach((client) => {
+                (wss.clients as Set<AppWebsocket>).forEach((client) => {
                     if (client.readyState !== WebSocket.OPEN) return;
-                    const canSend = event === "broadcast" ? client !== ws : true;
+                    const canSend = event === "broadcast" ? client.id !== ws.id : true;
                     if (!canSend) return;
 
                     return client.send(data, opts);
@@ -164,6 +193,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                     return sendGamesList();
                 }
             }
+            // TODO unsub
 
             if (event.startsWith("presence.update")) {
                 if (!payload) return;
@@ -187,98 +217,96 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 return sendPresenceList();
             }
 
-            if (event.startsWith("room.list")) {
+            if (event.startsWith("rooms.list")) {
                 return sendRoomsList();
             }
-            if (event.startsWith("room.create")) {
+            if (event.startsWith("rooms.create")) {
                 const name = getEventParam(event);
                 if (!name) return;
+                if (rooms.get(name)) return sendMsg(ws, ["room/exists", name], opts);
 
-                const room = makeRoom(name);
+                // TODO initial state
+                const room = makeRoom({ name });
                 room.clients.add(ws);
                 rooms.set(name, room);
+                user.rooms.add(room);
 
                 const interval = setInterval(
                     () =>
                         room.state.size &&
-                        room.clients.forEach((client) =>
-                            sendMsg(client, ["room/update", Object.fromEntries(room.state)])
-                        ),
+                        room.clients.forEach((client) => sendMsg(client, ["rooms/state#" + name, getRoomState(room)])),
+                    // TODO updateRate instead of hard-coded?
                     10 * 1000
                 );
                 tickIntervals.set(room, interval);
 
-                broadcastSub("rooms", getRoomListEvent());
                 broadcastEvent(room, event);
+                broadcastSub("rooms", getRoomListEvent());
                 return;
             }
-            if (event.startsWith("room.join")) {
+            if (event.startsWith("rooms.join")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
                 const room = rooms.get(name);
                 if (!room) return sendMsg(ws, ["room/notFound", name], opts);
+                if (isUserInSet(room.clients, ws.id)) return;
 
                 room.clients.add(ws);
-                sendMsg(ws, ["room/update", Object.fromEntries(room.state)]);
+                user.rooms.add(room);
+                sendMsg(ws, ["rooms/state#" + name, getRoomState(room)]);
 
+                broadcastEvent(room, event, getClientState(ws));
                 broadcastSub("rooms", getRoomListEvent());
-                broadcastEvent(room, event);
-                return;
-            }
-            if (event.startsWith("room.joinOrCreate")) {
-                const name = getEventParam(event);
-                if (!name) return;
-
-                const room = rooms.get(name) || makeRoom(name);
-                room.clients.add(ws);
-                rooms.set(name, room);
-
-                broadcastSub("rooms", getRoomListEvent());
-                broadcastEvent(room, event);
                 return;
             }
             // TODO room.update#name:field to update a specific field ?
             // TODO can only update room if in it ?
-            if (event.startsWith("room.update")) {
+            if (event.startsWith("rooms.update")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
                 const room = rooms.get(name);
                 if (!room) return sendMsg(ws, ["room/notFound", name], opts);
-                if (!payload) return;
 
-                Object.entries(payload).map(([key, value]) => room.state.set(key, value));
+                const update = safeJSONParse(payload) || {};
+                if (!Object.keys(update).length) return;
 
-                broadcastEvent(room, event, payload);
+                Object.entries(update).map(([key, value]) => room.state.set(key, value));
+
+                broadcastEvent(room, event, update);
                 return;
             }
-            if (event.startsWith("room.leave")) {
+            if (event.startsWith("rooms.leave")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
                 const room = rooms.get(name);
-                if (!room) return sendMsg(ws, ["game/notFound", name], opts);
+                if (!room) return sendMsg(ws, ["games/notFound", name], opts);
 
                 room.clients.delete(ws);
+                user.rooms.delete(room);
 
                 broadcastSub("rooms", getRoomListEvent());
                 return;
             }
-            if (event.startsWith("room.delete")) {
+            // TODO kick
+            if (event.startsWith("rooms.delete")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
-                rooms.delete(name);
                 const room = rooms.get(name);
+                rooms.delete(name);
+
                 const interval = tickIntervals.get(room);
                 clearInterval(interval);
                 tickIntervals.delete(room);
 
+                room.clients.forEach((client) => sendMsg(client, ["rooms/delete#" + name]));
                 broadcastSub("rooms", getRoomListEvent());
                 return;
             }
-            if (event.startsWith("room.relay")) {
+            if (event.startsWith("rooms.relay")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
@@ -288,7 +316,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 room.clients.forEach((client) => sendMsg(client, payload.data, opts));
                 return;
             }
-            if (event.startsWith("room.broadcast")) {
+            if (event.startsWith("rooms.broadcast")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
@@ -299,13 +327,15 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 return;
             }
 
-            if (event.startsWith("game.list")) {
+            if (event.startsWith("games.list")) {
                 return sendGamesList();
             }
-            if (event.startsWith("game.create")) {
+            if (event.startsWith("games.create")) {
                 const name = getEventParam(event);
                 if (!name) return;
+                if (rooms.get(name)) return sendMsg(ws, ["room/exists", name], opts);
 
+                // TODO initial state
                 const room = makeGameRoom(name);
                 room.clients.add(ws);
                 games.set(name, room);
@@ -313,9 +343,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 const interval = setInterval(
                     () =>
                         room.state.size &&
-                        room.clients.forEach((client) =>
-                            sendMsg(client, ["game/update", Object.fromEntries(room.state)])
-                        ),
+                        room.clients.forEach((client) => sendMsg(client, ["games/state", getRoomState(room)])),
                     room.tickRate
                 );
                 tickIntervals.set(room, interval);
@@ -323,51 +351,55 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 broadcastSub("games", getGameRoomListEvent());
                 return;
             }
-            if (event.startsWith("game.join")) {
+            if (event.startsWith("games.join")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
                 const room = games.get(name);
-                if (!room) return sendMsg(ws, ["game/notFound", name], opts);
+                if (!room) return sendMsg(ws, ["games/notFound", name], opts);
+                if (isUserInSet(room.clients, ws.id)) return;
 
                 room.clients.add(ws);
 
                 broadcastSub("games", getGameRoomListEvent());
                 return;
             }
-            if (event.startsWith("game.leave")) {
+            if (event.startsWith("games.leave")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
                 const room = games.get(name);
-                if (!room) return sendMsg(ws, ["game/notFound", name], opts);
+                if (!room) return sendMsg(ws, ["games/notFound", name], opts);
 
                 room.clients.delete(ws);
 
                 broadcastSub("games", getGameRoomListEvent());
                 return;
             }
-            if (event.startsWith("game.update")) {
+            if (event.startsWith("games.update")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
                 const room = games.get(name);
-                if (!room) return sendMsg(ws, ["game/notFound", name], opts);
-                if (!payload) return;
+                if (!room) return sendMsg(ws, ["games/notFound", name], opts);
 
-                const type = payload.__type === "meta" ? "meta" : "state";
+                const update = safeJSONParse(payload) || {};
+                if (!Object.keys(update).length) return;
+
+                const type = event.startsWith("games.update.meta") ? "meta" : "state";
                 const map = type === "meta" ? room.meta : room.state;
 
-                Object.entries(payload).map(([key, value]) => map.set(key, value));
+                Object.entries(update).map(([key, value]) => map.set(key, value));
 
                 return;
             }
-            if (event.startsWith("game.delete")) {
+            if (event.startsWith("games.delete")) {
                 const name = getEventParam(event);
                 if (!name) return;
 
-                games.delete(name);
                 const room = games.get(name);
+                games.delete(name);
+
                 const interval = tickIntervals.get(room);
                 clearInterval(interval);
                 tickIntervals.delete(room);
@@ -379,10 +411,10 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
     });
 
     const interval = setInterval(() => {
-        wss.clients.forEach((ws) => {
-            if ((ws as AppWebsocket).isAlive === false) return ws.terminate();
+        (wss.clients as Set<AppWebsocket>).forEach((ws) => {
+            if (ws.isAlive === false) return ws.terminate();
 
-            (ws as AppWebsocket).isAlive = false;
+            ws.isAlive = false;
             ws.ping(noop);
         });
     }, 60 * 1000);
@@ -400,7 +432,7 @@ const sendBinaryMsg = (ws: WebSocket, payload: WsEventPayload, opts?: any) =>
     ws.readyState === WebSocket.OPEN && ws.send(encode(payload), opts);
 const sendStrMsg = (ws: WebSocket, [event, data]: WsEventPayload, opts?: any) =>
     // @ts-ignore
-    console.log([event, data]) ||
+    console.log("<", [event, data]) ||
     (ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(event && data ? [event, data] : [event]), opts));
 const sendMsg = sendStrMsg;
 
@@ -414,6 +446,7 @@ interface Room {
     name: string;
     clients: Set<AppWebsocket>;
     state: Map<any, any>;
+    // TODO admin ?
 }
 
 /**
@@ -460,4 +493,12 @@ const decode = <Payload = any>(payload: ArrayBuffer | string): Payload => {
     } catch (err) {
         return null;
     }
+};
+
+const isUserInSet = (set: Set<AppWebsocket>, id: AppWebsocket["id"]) => {
+    for (let elem of set) {
+        if (elem.id === id) return true;
+    }
+
+    return false;
 };

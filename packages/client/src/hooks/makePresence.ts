@@ -58,7 +58,8 @@ export const makePresence = <Value extends ObjectLiteral>(
         usePresenceInit,
         usePresenceList,
         useOtherPresences,
-        useLocalPresence,
+        useMyPresence,
         useUpdatePresence,
+        useLocalPresence,
     };
 };

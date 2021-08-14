@@ -7,11 +7,12 @@ export interface Player {
     cursor?: { x: number; y: number };
 }
 
-export interface Room {
+export interface BaseRoom<Client extends { id: string }, State = ObjectLiteral> {
     name: string;
-    clients: Array<RoomPlayer>;
-    state: Map<any, any>;
+    clients: Array<Client>;
+    state: State;
 }
+export interface Room extends BaseRoom<Player> {}
 
 export interface RoomPlayer extends Pick<Player, "id"> {
     state: ObjectLiteral;

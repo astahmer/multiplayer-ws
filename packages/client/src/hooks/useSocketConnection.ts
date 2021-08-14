@@ -25,6 +25,8 @@ export const useSocketEmit = () => {
 export type EventPayload = string | { type: string; data?: any };
 
 export const useSocketStatus = () => useAtomValue(wsStatusAtom);
+
+const withLogs = false && isDev();
 export const useSocketConnection = (params?: ObjectLiteral) => {
     const [current, send] = useAtom(wsMachineAtom);
     const connectToWebsocket = () => {
@@ -39,7 +41,7 @@ export const useSocketConnection = (params?: ObjectLiteral) => {
     useOnFocus(() => current.matches("closed") && connectToWebsocket());
 
     // Debug
-    useSocketEvent(WsEvent.Any, (payload: { event: string; data: unknown }) => isDev() && console.log(payload));
+    useSocketEvent(WsEvent.Any, (payload: { event: string; data: unknown }) => withLogs && console.log(payload));
 };
 
 const useOnFocus = (callback: AnyFunction) => {
