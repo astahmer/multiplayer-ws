@@ -24,6 +24,10 @@ const getClientState = (ws: AppWebsocket) => ({
     id: (ws as AppWebsocket).id,
     ...Object.fromEntries(Array.from((ws as AppWebsocket).state.entries())),
 });
+const getClientMeta = (ws: AppWebsocket) => ({
+    id: (ws as AppWebsocket).id,
+    ...Object.fromEntries(Array.from((ws as AppWebsocket).meta.entries())),
+});
 
 type GlobalSubscription = "presence" | "rooms" | "games";
 
@@ -37,56 +41,81 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
         ["rooms", new Set()],
         ["games", new Set()],
     ]);
+    const socketIds = new Set();
+    const getId = (givenId: string) =>
+        givenId ? (socketIds.has(givenId) ? getRandomString(11) : givenId) : getRandomString(11);
+    let count = 0;
 
-    const getPresenceList = () => getClients(wss.clients as Set<AppWebsocket>).map(getClientState);
+    const getAllClients = () => getClients(wss.clients as Set<AppWebsocket>);
+    const getPresenceList = () => getAllClients().map(getClientState);
+    const getPresenceMetaList = () => getAllClients().map(getClientMeta);
 
     wss.on("connection", (ws: AppWebsocket, req) => {
         const isValid = isAuthValid(ws, req);
         if (!isValid) return;
 
         // TODO opts ?
+        // TODO clearInterval+setInterval on xxx/list to avoid duplication with globalSubscriptions
 
-        const broadcastPresenceList = () =>
+        const broadcastPresenceList = (type?: "meta") =>
             globalSubscriptions
                 .get("presence")
                 .forEach((client) => sendMsg(client, ["presence/list", getPresenceList()]));
 
-        const broadcastSub = (sub: GlobalSubscription, event: string, payload?: any) =>
+        const broadcastSub = (sub: GlobalSubscription, [event, payload]: WsEventPayload) =>
             globalSubscriptions
                 .get(sub)
                 .forEach((client) => client !== ws && sendMsg(client, [event.replace(".", "/"), payload]));
         const broadcastEvent = (room: Room, event: string, payload?: any) =>
             room.clients.forEach((client) => sendMsg(client, [event.replace(".", "/"), payload]));
-        const sendPresenceList = () =>
-            sendMsg(ws, ["presence/list", getClients(wss.clients as Set<AppWebsocket>).map(getClientState)]);
-        const sendRoomsList = () =>
-            sendMsg(ws, [
+        const sendPresenceList = () => sendMsg(ws, ["presence/list", getAllClients().map(getClientState)]);
+
+        const getRoomListEvent = () =>
+            [
                 "room/list",
                 Array.from(rooms.entries()).map(([name, room]) => ({
                     name,
                     clients: getClients(room.clients).map((ws) => ws.id),
                 })),
-            ]);
-        const sendGamesList = () =>
-            sendMsg(ws, [
+            ] as WsEventPayload;
+        const sendRoomsList = () => sendMsg(ws, getRoomListEvent());
+
+        const getGameRoomListEvent = () =>
+            [
                 "game/list",
                 Array.from(games.entries()).map(([name, room]) => ({
                     name,
                     clients: getClients(room.clients).map((ws) => ws.id),
                 })),
-            ]);
+            ] as WsEventPayload;
+        const sendGamesList = () => sendMsg(ws, getGameRoomListEvent());
 
+        const url = makeUrl(req);
+        const givenId = url.searchParams.get("id");
         ws.isAlive = true;
-        ws.id = getRandomString(11);
-        ws.state = new Map(Object.entries({ color: getRandomColor() }));
-        ws.meta = new Map(Object.entries({ intervals: new Set() }));
+        ws.id = getId(givenId);
+        socketIds.add(ws.id);
+
+        ws.state = new Map(
+            Object.entries({
+                username: url.searchParams.get("username") || "Guest" + ++count,
+                color: url.searchParams.get("color") || getRandomColor(),
+            })
+        );
+        ws.meta = new Map(Object.entries({ cursor: null }));
+        ws.internal = new Map(Object.entries({ intervals: new Set() }));
+        // TODO ws.internal state
+        sendMsg(ws, ["presence/update", getClientState(ws)]);
+
         ws.on("pong", () => (ws.isAlive = true));
         ws.on("close", () => {
-            broadcastSub("presence", "presence/exit");
             broadcastPresenceList();
+            const userIntervals = ws.internal.get("intervals") as Set<NodeJS.Timer>;
+            userIntervals.forEach((timer) => clearInterval(timer));
+            userIntervals.clear();
+            socketIds.delete(ws.id);
         });
 
-        broadcastSub("presence", "presence/entry");
         broadcastPresenceList();
 
         ws.on("message", (data: ArrayBuffer | string, binary: boolean) => {
@@ -119,7 +148,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
 
                 sub.add(ws);
 
-                const userIntervals = ws.meta.get("intervals") as Set<NodeJS.Timer>;
+                const userIntervals = ws.internal.get("intervals") as Set<NodeJS.Timer>;
                 if (type === "presence") {
                     userIntervals.add(setInterval(sendPresenceList, 10 * 1000));
                     return sendPresenceList();
@@ -142,7 +171,15 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 const map = type === "meta" ? ws.meta : ws.state;
 
                 Object.entries(payload).map(([key, value]) => map.set(key, value));
-                broadcastPresenceList();
+                if (type === "meta") {
+                    globalSubscriptions
+                        .get("presence")
+                        .forEach(
+                            (client) => client !== ws && sendMsg(client, ["presence/list#meta", getPresenceMetaList()])
+                        );
+                } else {
+                    broadcastPresenceList();
+                }
 
                 return;
             }
@@ -171,7 +208,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 );
                 tickIntervals.set(room, interval);
 
-                broadcastSub("rooms", "room/list", event);
+                broadcastSub("rooms", getRoomListEvent());
                 broadcastEvent(room, event);
                 return;
             }
@@ -185,7 +222,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 room.clients.add(ws);
                 sendMsg(ws, ["room/update", Object.fromEntries(room.state)]);
 
-                broadcastSub("rooms", "room/list", event);
+                broadcastSub("rooms", getRoomListEvent());
                 broadcastEvent(room, event);
                 return;
             }
@@ -197,7 +234,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 room.clients.add(ws);
                 rooms.set(name, room);
 
-                broadcastSub("rooms", "room/list", event);
+                broadcastSub("rooms", getRoomListEvent());
                 broadcastEvent(room, event);
                 return;
             }
@@ -225,7 +262,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
 
                 room.clients.delete(ws);
 
-                broadcastSub("rooms", "room/list", event);
+                broadcastSub("rooms", getRoomListEvent());
                 return;
             }
             if (event.startsWith("room.delete")) {
@@ -238,7 +275,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 clearInterval(interval);
                 tickIntervals.delete(room);
 
-                broadcastSub("rooms", "room/list", event);
+                broadcastSub("rooms", getRoomListEvent());
                 return;
             }
             if (event.startsWith("room.relay")) {
@@ -283,7 +320,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 );
                 tickIntervals.set(room, interval);
 
-                broadcastSub("games", event);
+                broadcastSub("games", getGameRoomListEvent());
                 return;
             }
             if (event.startsWith("game.join")) {
@@ -295,7 +332,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
 
                 room.clients.add(ws);
 
-                broadcastSub("games", event);
+                broadcastSub("games", getGameRoomListEvent());
                 return;
             }
             if (event.startsWith("game.leave")) {
@@ -307,7 +344,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
 
                 room.clients.delete(ws);
 
-                broadcastSub("games", event);
+                broadcastSub("games", getGameRoomListEvent());
                 return;
             }
             if (event.startsWith("game.update")) {
@@ -335,7 +372,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 clearInterval(interval);
                 tickIntervals.delete(room);
 
-                broadcastSub("games", event);
+                broadcastSub("games", getGameRoomListEvent());
                 return;
             }
         });
@@ -350,7 +387,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
         });
     }, 60 * 1000);
 
-    wss.on("close", (aaa, bbb, ccc, dd) => {
+    wss.on("close", () => {
         clearInterval(interval);
     });
 
@@ -368,23 +405,6 @@ const sendStrMsg = (ws: WebSocket, [event, data]: WsEventPayload, opts?: any) =>
 const sendMsg = sendStrMsg;
 
 type WsEventPayload<Data = any> = [event: string, data?: Data];
-type WsEventPayloadData = [event: string, payload: Primitive];
-
-// type StartsWith<Prefix extends string> = `${Prefix}${string}`;
-// const startsWith = <Prefix extends string>(prefix: Prefix, string: string): string is StartsWith<Prefix> =>
-//     string.startsWith(prefix);
-// type WsEventMap =
-//     | { event: `room.join#${string}` }
-//     | { event: `room.create#${string}` }
-//     | { event: `room.joinOrCreate#${string}` }
-//     | { event: `room.delete#${string}` }
-//     | { event: `room.relay#${string}`; payload: WsEventPayloadData }
-//     | { event: `room.broadcast#${string}`; payload: WsEventPayloadData }
-//     | { event: "relay"; payload: WsEventPayloadData }
-//     | { event: "broadcast"; payload: WsEventPayloadData }
-//     | { event: `game.join#${string}` }
-//     | { event: `game.create#${string}` }
-//     | { event: `game.update#${string}`; payload: ObjectLiteral };
 
 /**
  * Room are used to sync only when events happen and every X seconds
@@ -406,11 +426,17 @@ interface GameRoom extends Room {
 }
 
 function noop() {}
-type AppWebsocket = WebSocket & { id?: string; state: Map<any, any>; meta: Map<any, any>; isAlive?: boolean };
+type AppWebsocket = WebSocket & {
+    id?: string;
+    state: Map<any, any>;
+    meta: Map<any, any>;
+    internal: Map<any, any>;
+    isAlive?: boolean;
+};
 
 const pw = "chainbreak";
 const isAuthValid = async (ws: WebSocket, req: http.IncomingMessage) => {
-    const url = new URL((req.url.startsWith("/") ? "http://localhost" : "") + req.url);
+    const url = makeUrl(req);
     const auth = url.searchParams.get("auth");
     if (auth !== pw) {
         // cheap rate-limiting
@@ -421,6 +447,7 @@ const isAuthValid = async (ws: WebSocket, req: http.IncomingMessage) => {
 
     return true;
 };
+const makeUrl = (req: http.IncomingMessage) => new URL((req.url.startsWith("/") ? "http://localhost" : "") + req.url);
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

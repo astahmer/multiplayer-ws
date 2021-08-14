@@ -1,19 +1,17 @@
 import { getNextIndex, getRandomIntIn, getRandomString, pickOne } from "@pastable/core";
-import { Game, Player } from "../types";
+import { Player } from "../types";
 
 export const makeId = () => getRandomString(12);
 export const makeUsername = () => getRandomString(getRandomIntIn(4, 10));
-export const makePlayer = (): Player => ({
+export const makePlayer = (): Partial<Player> => ({
     id: makeId(),
-    username: makeUsername(),
     color: getRandomColor(),
 });
-export const makeGame = (initialPlayer: Player): Game => ({ id: makeId(), players: [initialPlayer], mode: "duel" });
-export const makeEmptyGame = (): Game => ({ id: makeId(), players: [], mode: "duel" });
 
 const hexLetters = "0123456789ABCDEF".toLowerCase();
 const hexLettersArray = hexLetters.split("");
 
+const COLORS = ["#E57373", "#9575CD", "#4FC3F7", "#81C784", "#FFF176", "#FF8A65", "#F06292", "#7986CB"];
 export const getRandomColor = () =>
     rainbow(getRandomIntIn(1000) % 999) + pickOne(hexLettersArray.slice(2, 6)) + pickOne(hexLettersArray.slice());
 

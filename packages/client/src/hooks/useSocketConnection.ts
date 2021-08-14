@@ -1,6 +1,6 @@
 import { getWebsocketURL, WsEvent } from "@/functions/ws";
 import { emit, wsMachineAtom, wsStatusAtom } from "@/machines/websocketMachine";
-import { AnyFunction, isDev, useEvent } from "@pastable/core";
+import { AnyFunction, isDev, ObjectLiteral, useEvent } from "@pastable/core";
 import { useAtom } from "jotai";
 import { useEffect } from "react";
 
@@ -25,10 +25,10 @@ export const useSocketEmit = () => {
 export type EventPayload = string | { type: string; data?: any };
 
 export const useSocketStatus = () => useAtomValue(wsStatusAtom);
-export const useSocketConnection = () => {
+export const useSocketConnection = (params?: ObjectLiteral) => {
     const [current, send] = useAtom(wsMachineAtom);
     const connectToWebsocket = () => {
-        const url = getWebsocketURL() + "?" + new URLSearchParams({ auth: "chainbreak" }).toString();
+        const url = getWebsocketURL() + "?" + new URLSearchParams({ auth: "chainbreak", ...params }).toString();
         send({ type: "OPEN", url });
     };
 

@@ -1,15 +1,23 @@
+import { ObjectLiteral } from "@pastable/core";
+
 export interface Player {
     id: string;
     username: string;
     color: string;
-}
-export interface Game {
-    id: string;
-    players: Array<Player>;
-    mode: "duel" | "free-for-all";
+    cursor?: { x: number; y: number };
 }
 
 export interface Room {
-    id: string;
-    clients: Array<Player>;
+    name: string;
+    clients: Array<RoomPlayer>;
+    state: Map<any, any>;
+}
+
+export interface RoomPlayer extends Pick<Player, "id"> {
+    state: ObjectLiteral;
+}
+
+export interface AvailableRoom {
+    name: string;
+    clients: Array<Pick<Player, "id">>;
 }
