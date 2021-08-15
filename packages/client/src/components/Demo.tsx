@@ -1,7 +1,7 @@
 import { getRandomColor } from "@/functions/utils";
 import { usePresenceList, useUpdatePresence } from "@/hooks/usePresence";
 import { useRoomList, useSocketClient } from "@/hooks/useRoomState";
-import { Button, Center, chakra, Input, SimpleGrid, Stack } from "@chakra-ui/react";
+import { Button, Center, chakra, Input, SimpleGrid, Stack, useColorMode } from "@chakra-ui/react";
 import { getRandomString } from "@pastable/core";
 import { useRef } from "react";
 import { LobbyRoom } from "./GameRoom";
@@ -20,6 +20,7 @@ export const Demo = () => {
 
     const roomList = useRoomList();
     const inputRef = useRef<HTMLInputElement>();
+    const { toggleColorMode } = useColorMode();
 
     // const presenceList = usePresenceList();
 
@@ -38,6 +39,7 @@ export const Demo = () => {
                         <Input ref={inputRef} defaultValue="oui" />
                         <Button onClick={joinRoom}>Join room</Button>
                     </Stack>
+                    <Button onClick={toggleColorMode}>Toggle color mode</Button>
                 </Stack>
             </Center>
             <SimpleGrid columns={[1, 1, 2, 3, 3, 4]} w="100%" spacing="8">
