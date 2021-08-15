@@ -1,4 +1,12 @@
-import { getEventParam, getRoomClients, getRoomState, isUserInSet, makeGameRoom } from "helpers";
+import {
+    getEventParam,
+    getGameFullState,
+    getRoomClients,
+    getRoomFullState,
+    getRoomState,
+    isUserInSet,
+    makeGameRoom,
+} from "helpers";
 import { EventHandlerRef } from "types";
 import { sendMsg } from "ws-helpers";
 
@@ -22,8 +30,7 @@ export function handleGamesEvent({
         if (!name) return;
         if (games.get(name)) return sendMsg(ws, ["room/exists", name], opts);
 
-        // TODO initial state
-        const room = makeGameRoom(name, payload);
+        const room = makeGameRoom({ name, state: payload });
         room.clients.add(ws);
         games.set(name, room);
 
@@ -60,6 +67,17 @@ export function handleGamesEvent({
         return;
     }
 
+    if (event.startsWith("games.get")) {
+        const name = getEventParam(event);
+        if (!name) return;
+
+        const room = games.get(name);
+        if (!room) return sendMsg(ws, ["room/notFound", name], opts);
+
+        sendMsg(ws, ["games/state#" + name, getGameFullState(room)]);
+        return;
+    }
+
     if (event.startsWith("games.leave")) {
         const name = getEventParam(event);
         if (!name) return;
@@ -69,6 +87,7 @@ export function handleGamesEvent({
 
         room.clients.delete(ws);
 
+        sendMsg(ws, ["games/leave#" + name], opts);
         broadcastSub("games", getGameRoomListEvent());
         return;
     }
@@ -81,9 +100,13 @@ export function handleGamesEvent({
         if (!room) return sendMsg(ws, ["games/notFound", name], opts);
 
         // TODO check permissions
-        room.clients.delete(ws);
-        user.rooms.delete(room);
+        const client = Array.from(room.clients).find((client) => client.id === payload);
+        if (!client) return sendMsg(ws, ["clients/notFound", name], opts);
 
+        room.clients.delete(client);
+        client.user.rooms.delete(room);
+
+        sendMsg(client, ["games/leave#" + name], opts);
         broadcastSub("rooms", getGameRoomListEvent());
         return;
     }

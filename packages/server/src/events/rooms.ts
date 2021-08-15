@@ -1,5 +1,5 @@
 import { safeJSONParse } from "@pastable/core";
-import { makeRoom, getRoomFullState, getClientState, getEventParam, isUserInSet } from "helpers";
+import { makeRoom, getRoomFullState, getEventParam, isUserInSet, getRoomState } from "helpers";
 import { AppWebsocket, EventHandlerRef } from "types";
 import { sendMsg } from "ws-helpers";
 
@@ -25,8 +25,7 @@ export function handleRoomsEvent({
         if (!name) return;
         if (rooms.get(name)) return sendMsg(ws, ["room/exists", name], opts);
 
-        // TODO initial state
-        const room = makeRoom({ name });
+        const room = makeRoom({ name, state: payload });
         room.clients.add(ws);
         rooms.set(name, room);
         user.rooms.add(room);
@@ -42,6 +41,7 @@ export function handleRoomsEvent({
 
         broadcastEvent(room, event);
         broadcastSub("rooms", getRoomListEvent());
+        onJoinRoom(room);
         sendFullState(ws);
         return;
     }
@@ -77,6 +77,17 @@ export function handleRoomsEvent({
         return;
     }
 
+    if (event.startsWith("rooms.get")) {
+        const name = getEventParam(event);
+        if (!name) return;
+
+        const room = rooms.get(name);
+        if (!room) return sendMsg(ws, ["room/notFound", name], opts);
+
+        sendMsg(ws, ["rooms/state#" + name, getRoomFullState(room)]);
+        return;
+    }
+
     if (event.startsWith("rooms.leave")) {
         const name = getEventParam(event);
         if (!name) return;
@@ -87,6 +98,7 @@ export function handleRoomsEvent({
         room.clients.delete(ws);
         user.rooms.delete(room);
 
+        sendMsg(ws, ["rooms/leave#" + name], opts);
         broadcastSub("rooms", getRoomListEvent());
         return;
     }
@@ -99,9 +111,13 @@ export function handleRoomsEvent({
         if (!room) return sendMsg(ws, ["games/notFound", name], opts);
 
         // TODO check permissions
-        room.clients.delete(ws);
-        user.rooms.delete(room);
+        const client = Array.from(room.clients).find((client) => client.id === payload);
+        if (!client) return sendMsg(ws, ["clients/notFound", name], opts);
 
+        room.clients.delete(client);
+        client.user.rooms.delete(room);
+
+        sendMsg(client, ["rooms/leave#" + name], opts);
         broadcastSub("rooms", getRoomListEvent());
         return;
     }

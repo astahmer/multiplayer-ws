@@ -1,6 +1,7 @@
 import { getRandomColor } from "@/functions/utils";
 import { usePresenceList, useUpdatePresence } from "@/hooks/usePresence";
-import { useRoomList, useSocketClient } from "@/hooks/useRoomState";
+import { useRoomList } from "@/hooks/useRoomState";
+import { useSocketClient } from "@/hooks/useSocketClient";
 import { Button, Center, chakra, Input, SimpleGrid, Stack, useColorMode } from "@chakra-ui/react";
 import { getRandomString } from "@pastable/core";
 import { useRef } from "react";
@@ -15,7 +16,7 @@ export const Demo = () => {
     const updateRandomColor = () => setPresence((player) => ({ ...player, color: getRandomColor() }));
 
     const client = useSocketClient();
-    const createRoom = () => client.rooms.create(inputRef.current.value);
+    const createRoom = () => client.rooms.create(inputRef.current.value, { status: "waiting" });
     const joinRoom = () => client.rooms.join(inputRef.current.value);
 
     const roomList = useRoomList();

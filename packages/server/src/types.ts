@@ -50,6 +50,7 @@ export type AppWebsocket = WebSocket & {
     meta: Map<any, any>;
     internal: Map<any, any>;
     isAlive?: boolean;
+    user: User;
 };
 
 interface WsEventObject {

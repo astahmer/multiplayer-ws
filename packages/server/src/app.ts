@@ -125,11 +125,8 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
         userIds.add(ws.id);
 
         const user = getUser(ws.id);
+        ws.user = user;
         user.clients.add(ws);
-        user.rooms.forEach((room) => {
-            room.clients.add(ws);
-            onJoinRoom(room);
-        });
 
         ws.state = new Map(
             Object.entries({
@@ -139,7 +136,15 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
         );
         ws.meta = new Map(Object.entries({ cursor: null }));
         ws.internal = new Map(Object.entries({ timers: new Map() }));
+
+        // Send his presence
         sendMsg(ws, ["presence/update", getClientState(ws)]);
+
+        // re-join rooms where the user is active on other clients
+        user.rooms.forEach((room) => {
+            room.clients.add(ws);
+            onJoinRoom(room);
+        });
 
         ws.on("pong", () => (ws.isAlive = true));
         ws.on("close", () => {
