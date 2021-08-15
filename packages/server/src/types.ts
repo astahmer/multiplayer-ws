@@ -4,25 +4,28 @@ export type GlobalSubscription = "presence" | "rooms" | "games";
 
 export interface User {
     clients: Set<AppWebsocket>;
-    rooms: Set<Room>;
+    rooms: Set<Room | GameRoom>;
 }
 
 export type WsEventPayload<Data = any> = [event: string, data?: Data];
 
 // TODO statemachine events
-export interface Room {
+export interface BaseRoom {
     name: string;
     clients: Set<AppWebsocket>;
     state: Map<any, any>;
     internal: Map<any, any>;
+    type: "lobby" | "game";
     // TODO admin ?
 }
+export type Room = LobbyRoom | GameRoom;
 
 /**
  * LobbyRoom are used to sync only when events happen and every X seconds
  * Events are broadcasted to everyone else in the room but the sender
  */
-export interface LobbyRoom extends Room {
+export interface LobbyRoom extends BaseRoom {
+    type: "lobby";
     config: RoomConfig;
 }
 export interface RoomConfig {
@@ -34,14 +37,15 @@ export interface RoomConfig {
  * GameRoom are used to handle fast updates
  * Events are broadcasted to everyone at the given tick rate
  */
-export interface GameRoom extends Room {
-    meta?: Map<any, any>;
-    config?: GameRoomConfig;
+export interface GameRoom extends BaseRoom {
+    type: "game";
+    meta: Map<any, any>;
+    config: GameRoomConfig;
 }
 export interface GameRoomConfig {
     tickRate: number;
     clientsRefreshRate: number;
-    stateKeysToRemoveOnDisconnect: string[];
+    shouldRemovePlayerStateOnDisconnect: boolean;
     [key: string]: any;
 }
 

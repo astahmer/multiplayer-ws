@@ -42,7 +42,7 @@ export function handlePresenceEvents({
         }
     }
 
-    if (event.startsWith("unsub")) {
+    if (event.startsWith("sub")) {
         const type = getEventParam(event) as GlobalSubscription;
         if (!type) return;
 

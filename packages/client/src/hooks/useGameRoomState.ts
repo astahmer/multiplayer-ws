@@ -12,6 +12,7 @@ export const gameRefFamily = atomFamily(
     (props: Room) => atom({ current: props }),
     (a, b) => a.name === b.name
 );
+/** Will not trigger a single re-render but rather return a ref that will be constantly updated */
 export const useGameRoomRef = <State extends ObjectLiteral = Room>(name: string) => {
     const gameRef = useAtomValue(gameRefFamily({ name, clients: [], state: {} }));
 
@@ -58,6 +59,8 @@ export const gameFamily = atomFamily(
     (props: Room) => atom(props),
     (a, b) => a.name === b.name
 );
+
+/** Will trigger re-render on each updates */
 export const useGameRoomState = <State extends ObjectLiteral = Room>(name: string) => {
     const initialValue = useConst({ name, clients: [], state: {} });
     const [game, setGame] = useAtom(gameFamily(initialValue));

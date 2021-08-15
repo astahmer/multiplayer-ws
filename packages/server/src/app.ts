@@ -1,29 +1,14 @@
-import { getRandomString, ObjectLiteral, Primitive, safeJSONParse, wait } from "@pastable/core";
+import { getRandomString } from "@pastable/core";
 import { isAuthValid } from "auth";
-import fastify from "fastify";
 import { handleGamesEvent } from "events/games";
-import {
-    makeUser,
-    getClients,
-    getClientState,
-    getClientMeta,
-    makeUrl,
-    makeRoom,
-    getRoomFullState,
-    makeGameRoom,
-    getRoomState,
-    getEventParam,
-    isUserInSet,
-} from "helpers";
-import http from "http";
+import { handlePresenceEvents } from "events/presence";
 import { handleRoomsEvent } from "events/rooms";
+import fastify from "fastify";
+import { getClientMeta, getClients, getClientState, getRoomFullState, makeUrl, makeUser } from "helpers";
 import { AppWebsocket, GameRoom, GlobalSubscription, LobbyRoom, Room, User, WsEventPayload } from "types";
-import { URL } from "url";
-import { TextDecoder, TextEncoder } from "util";
 import { getRandomColor } from "utils";
 import WebSocket from "ws";
 import { decode, sendMsg } from "ws-helpers";
-import { handlePresenceEvents } from "events/presence";
 
 export const makeApp = () => {
     const app = fastify({ logger: true });
@@ -158,7 +143,10 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
             userIds.delete(ws.id); // Unlock user id
 
             // Remove user from each room he was in
-            user.rooms.forEach((room) => room.clients.delete(ws));
+            user.rooms.forEach((room) => {
+                if (room.type === "game" && room.config.shouldRemovePlayerStateOnDisconnect) room.state.delete(ws.id);
+                room.clients.delete(ws);
+            });
 
             // TODO rm every user.clients ??
             // user.clients.forEach((client) => user.rooms.forEach((room) => room.clients.delete(client)));
@@ -203,6 +191,8 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
             if (["relay", "broadcast"].includes(event)) {
                 (wss.clients as Set<AppWebsocket>).forEach((client) => {
                     if (client.readyState !== WebSocket.OPEN) return;
+                    if (!Array.isArray(payload.data)) return;
+
                     const canSend = event === "broadcast" ? client.id !== ws.id : true;
                     if (!canSend) return;
 
@@ -211,7 +201,7 @@ export const makeWsRelay = (options: WebSocket.ServerOptions) => {
                 return;
             }
 
-            if (event.startsWith("sub") || event.startsWith("presence.")) {
+            if (event.startsWith("sub") || event.startsWith("unsub") || event.startsWith("presence.")) {
                 return handlePresenceEvents({ ...ref, event, payload });
             }
 

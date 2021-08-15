@@ -1,7 +1,9 @@
 import { successToast } from "@/functions/toasts";
+import { initialPresence } from "@/hooks/usePresence";
 import { useRoomState } from "@/hooks/useRoomState";
 import { AvailableRoom, Room } from "@/types";
 import { Button, Stack } from "@chakra-ui/react";
+import { getRandomString } from "@pastable/core";
 
 // TODO colyseus-monitor like
 export const LobbyRoom = ({ availableRoom }: { availableRoom: AvailableRoom }) => {
@@ -26,6 +28,11 @@ export const LobbyRoom = ({ availableRoom }: { availableRoom: AvailableRoom }) =
                 ))}
             <Button onClick={toggleDone}>Toggle done</Button>
             <Button onClick={() => room.delete()}>Remove</Button>
+            {room.clients.some((player) => player.id !== initialPresence.id) && (
+                <Button onClick={() => room.kick(room.clients.find((player) => player.id !== initialPresence.id).id)}>
+                    Kick (not me)
+                </Button>
+            )}
             <Button
                 onClick={() => {
                     room.get();
@@ -41,6 +48,8 @@ export const LobbyRoom = ({ availableRoom }: { availableRoom: AvailableRoom }) =
             >
                 Get
             </Button>
+            <Button onClick={() => room.broadcast([getRandomString()])}>Broadcast</Button>
+            <Button onClick={() => room.relay([getRandomString()])}>Relay</Button>
         </Stack>
     );
 };

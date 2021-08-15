@@ -118,6 +118,7 @@ export function handleRoomsEvent({
         client.user.rooms.delete(room);
 
         sendMsg(client, ["rooms/leave#" + name], opts);
+        // TODO prévenir les autres joueurs de la room
         broadcastSub("rooms", getRoomListEvent());
         return;
     }
@@ -140,17 +141,22 @@ export function handleRoomsEvent({
     }
 
     if (event.startsWith("rooms.relay")) {
+        if (!Array.isArray(payload.data)) return;
+
         const name = getEventParam(event);
         if (!name) return;
 
         const room = rooms.get(name);
         if (!room) return sendMsg(ws, ["room/notFound", name], opts);
+        if (!Array.isArray(payload.data)) return;
 
         room.clients.forEach((client) => sendMsg(client, payload.data, opts));
         return;
     }
 
     if (event.startsWith("rooms.broadcast")) {
+        if (!Array.isArray(payload.data)) return;
+
         const name = getEventParam(event);
         if (!name) return;
 

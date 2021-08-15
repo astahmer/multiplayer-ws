@@ -1,12 +1,23 @@
 import { useSocketEmit, useSocketStatus } from "@/hooks/useSocketConnection";
 import { Player, Room } from "@/types";
 import { ObjectLiteral, stringify } from "@pastable/core";
+import { usePresenceIsSynced } from "./usePresence";
 
 export const useSocketClient = () => {
     const emit = useSocketEmit();
     const status = useSocketStatus();
+    const isSynced = usePresenceIsSynced();
 
-    // TODO relay/broadcast + sub/unsub + presence
+    const relay = (msg: any) => emit("relay", msg);
+    const broadcast = (msg: any) => emit("broadcast", msg);
+
+    const presence: PresenceClient = {
+        sub: (topic: string) => emit("sub#" + topic),
+        unsub: (topic: string) => emit("unsub#" + topic),
+        list: () => emit("presence.list"),
+        update: (state: Partial<Player>) => emit("presence.update", state),
+        updateMeta: (meta: ObjectLiteral) => emit("presence.update#meta", meta),
+    };
 
     const rooms: RoomClient = {
         list: () => emit("rooms.list"),
@@ -23,7 +34,7 @@ export const useSocketClient = () => {
         broadcast: (name: Room["name"], msg: any) => emit("rooms.broadcast#" + name, msg),
     };
 
-    const games = {
+    const games: GameRoomClient = {
         list: () => emit("games.list"),
         sub: () => emit("sub#games"),
         unsub: () => emit("unsub#games"),
@@ -40,8 +51,16 @@ export const useSocketClient = () => {
         broadcast: (name: Room["name"], msg: any) => emit("games.broadcast#" + name, msg),
     };
 
-    return { emit, status, rooms, games };
+    return { emit, status, isSynced, presence, rooms, games, relay, broadcast };
 };
+
+export interface PresenceClient {
+    sub: (topic: string) => void;
+    unsub: (topic: string) => void;
+    list: () => void;
+    update: (state: Partial<Player>) => void;
+    updateMeta: (meta: ObjectLiteral) => void;
+}
 
 export interface RoomClient {
     list: () => void;

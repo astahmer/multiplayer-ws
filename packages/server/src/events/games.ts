@@ -34,6 +34,7 @@ export function handleGamesEvent({
         const room = makeGameRoom({ name, state: payload });
         room.clients.add(ws);
         games.set(name, room);
+        user.rooms.add(room);
 
         // Game ticks
         const stateRefreshInterval = setInterval(
@@ -65,6 +66,7 @@ export function handleGamesEvent({
         if (isUserInSet(room.clients, ws.id)) return;
 
         room.clients.add(ws);
+        user.rooms.add(room);
 
         broadcastSub("games", getGameRoomListEvent());
         return;
@@ -110,6 +112,7 @@ export function handleGamesEvent({
         client.user.rooms.delete(room);
 
         sendMsg(client, ["games/leave#" + name], opts);
+        // TODO prévenir les autres joueurs de la room
         broadcastSub("rooms", getGameRoomListEvent());
         return;
     }

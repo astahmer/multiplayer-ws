@@ -1,4 +1,3 @@
-import { ObjectLiteral, pick } from "@pastable/core";
 import http from "http";
 import { AppWebsocket, GameRoom, GameRoomConfig, LobbyRoom, Room, User } from "types";
 import { URL } from "url";
@@ -11,6 +10,7 @@ export const getEventParam = (event: string) => event.split("#")[1];
 export const makeUser = (): User => ({ clients: new Set(), rooms: new Set() });
 export const makeRoom = ({ name, state }: Pick<Room, "name"> & Partial<Pick<Room, "state">>): LobbyRoom => ({
     name,
+    type: "lobby",
     clients: new Set(),
     state: new Map(Object.entries(state || {})),
     config: { updateRate: 10 * 1000 },
@@ -22,7 +22,8 @@ export const makeGameRoom = ({
     config,
 }: Pick<Room, "name"> & Partial<Pick<Room, "state">> & { config?: Partial<GameRoomConfig> }): GameRoom => ({
     ...makeRoom({ name, state }),
-    config: { tickRate: 100, clientsRefreshRate: 10 * 1000, stateKeysToRemoveOnDisconnect: [], ...config },
+    type: "game",
+    config: { tickRate: 100, clientsRefreshRate: 10 * 1000, shouldRemovePlayerStateOnDisconnect: true, ...config },
     meta: new Map(),
 });
 
