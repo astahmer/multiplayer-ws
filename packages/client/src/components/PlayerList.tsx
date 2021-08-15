@@ -25,7 +25,7 @@ export const PlayerList = () => {
                         {initialPresence.id === presence.id ? (
                             <PresenceName />
                         ) : (
-                            <chakra.span color="black">{presence.username}</chakra.span>
+                            <chakra.span>{presence.username}</chakra.span>
                         )}
                     </Box>
                 ))}
