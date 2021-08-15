@@ -40,6 +40,7 @@ export interface GameRoom extends Room {
 }
 export interface GameRoomConfig {
     tickRate: number;
+    clientsRefreshRate: number;
     stateKeysToRemoveOnDisconnect: string[];
     [key: string]: any;
 }

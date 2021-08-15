@@ -1,5 +1,6 @@
+import { successToast } from "@/functions/toasts";
 import { useRoomState } from "@/hooks/useRoomState";
-import { AvailableRoom } from "@/types";
+import { AvailableRoom, Room } from "@/types";
 import { Button, Stack } from "@chakra-ui/react";
 
 // TODO colyseus-monitor like
@@ -7,10 +8,6 @@ export const LobbyRoom = ({ availableRoom }: { availableRoom: AvailableRoom }) =
     const roomName = availableRoom.name;
 
     const room = useRoomState<DemoRoomState>(roomName);
-    const joinRoom = () => room.join();
-    const leaveRoom = () => room.leave();
-    const deleteRoom = () => room.delete();
-
     const toggleDone = () => room.update({ mark: !room.state.mark });
 
     return (
@@ -22,10 +19,28 @@ export const LobbyRoom = ({ availableRoom }: { availableRoom: AvailableRoom }) =
             <span>clients: {availableRoom.clients.map((id) => id).toString()}</span>
             <span>names: {room.clients.map((player) => player.username).toString()}</span>
             {room.state.status === "waiting" &&
-                (room.isIn ? <Button onClick={leaveRoom}>Leave</Button> : <Button onClick={joinRoom}>Join</Button>)}
+                (room.isIn ? (
+                    <Button onClick={() => room.leave()}>Leave</Button>
+                ) : (
+                    <Button onClick={() => room.join()}>Join</Button>
+                ))}
             <Button onClick={toggleDone}>Toggle done</Button>
-            <Button onClick={deleteRoom}>Remove</Button>
-            {/* <Button onClick={play}>Play</Button> */}
+            <Button onClick={() => room.delete()}>Remove</Button>
+            <Button
+                onClick={() => {
+                    room.get();
+                    room.once("state", (room: Room) =>
+                        successToast({
+                            title: room.name,
+                            description: room.clients
+                                .map((player) => player.username + " - " + player.color)
+                                .toString(),
+                        })
+                    );
+                }}
+            >
+                Get
+            </Button>
         </Stack>
     );
 };

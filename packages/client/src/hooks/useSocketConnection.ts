@@ -12,6 +12,7 @@ import { useAtomValue } from "jotai/utils";
 const wsEmitterAtom = atom((get) => get(wsMachineAtom).context.emitter);
 export const useSocketEventEmitter = () => useAtomValue(wsEmitterAtom);
 export const useSocketEvent = makeEventEmitterHook(wsEmitterAtom);
+
 export const useSocketEmit = () => {
     const wsMachine = useAtomValue(wsMachineAtom);
     return (eventOrObj: string | { type: string; data?: any }, data?: any) => {

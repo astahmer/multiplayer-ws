@@ -22,7 +22,7 @@ export const makeGameRoom = ({
     config,
 }: Pick<Room, "name"> & Partial<Pick<Room, "state">> & { config?: Partial<GameRoomConfig> }): GameRoom => ({
     ...makeRoom({ name, state }),
-    config: { tickRate: 100, stateKeysToRemoveOnDisconnect: [], ...config },
+    config: { tickRate: 100, clientsRefreshRate: 10 * 1000, stateKeysToRemoveOnDisconnect: [], ...config },
     meta: new Map(),
 });
 

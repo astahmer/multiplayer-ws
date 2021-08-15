@@ -30,10 +30,12 @@ export function handleGamesEvent({
         if (!name) return;
         if (games.get(name)) return sendMsg(ws, ["room/exists", name], opts);
 
+        // TODO config par jeu ici, getConfig(XXX)
         const room = makeGameRoom({ name, state: payload });
         room.clients.add(ws);
         games.set(name, room);
 
+        // Game ticks
         const stateRefreshInterval = setInterval(
             () =>
                 room.state.size &&
@@ -43,9 +45,10 @@ export function handleGamesEvent({
         const timers = room.internal.get("timers") as Map<string, NodeJS.Timer>;
         timers.set("state", stateRefreshInterval);
 
+        // Ensure that clients are sync
         const clientsRefreshInterval = setInterval(
             () => room.clients.forEach((client) => sendMsg(client, ["games/clients#" + name, getRoomClients(room)])),
-            room.config.tickRate
+            room.config.clientsRefreshRate
         );
         timers.set("clients", clientsRefreshInterval);
 

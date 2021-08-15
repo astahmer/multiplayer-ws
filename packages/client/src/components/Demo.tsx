@@ -5,18 +5,18 @@ import { useSocketClient } from "@/hooks/useSocketClient";
 import { Button, Center, chakra, Input, SimpleGrid, Stack, useColorMode } from "@chakra-ui/react";
 import { getRandomString } from "@pastable/core";
 import { useRef } from "react";
-import { LobbyRoom } from "./GameRoom";
+import { LobbyRoom } from "./LobbyRoom";
 import { PlayerList } from "./PlayerList";
 import { PresenceName } from "./PresenceName";
 
 // TODO proxy+permission xxx.push() emit/throw etc
-
+const initialRoomState = { status: "waiting" };
 export const Demo = () => {
     const setPresence = useUpdatePresence();
     const updateRandomColor = () => setPresence((player) => ({ ...player, color: getRandomColor() }));
 
     const client = useSocketClient();
-    const createRoom = () => client.rooms.create(inputRef.current.value, { status: "waiting" });
+    const createRoom = () => client.rooms.create(inputRef.current.value, initialRoomState);
     const joinRoom = () => client.rooms.join(inputRef.current.value);
 
     const roomList = useRoomList();
@@ -35,7 +35,9 @@ export const Demo = () => {
                         <PresenceName />
                     </Stack>
                     <Button onClick={createRoom}>New room</Button>
-                    <Button onClick={() => client.rooms.create(getRandomString())}>New random room</Button>
+                    <Button onClick={() => client.rooms.create(getRandomString(), initialRoomState)}>
+                        New random room
+                    </Button>
                     <Stack direction="row">
                         <Input ref={inputRef} defaultValue="oui" />
                         <Button onClick={joinRoom}>Join room</Button>

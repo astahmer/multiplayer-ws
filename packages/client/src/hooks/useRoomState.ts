@@ -1,20 +1,12 @@
 import { useSocketEvent, useSocketEventEmitter } from "@/hooks/useSocketConnection";
 import { AvailableRoom, Player, Room } from "@/types";
 import { useConst } from "@chakra-ui/react";
-import {
-    getIntersection,
-    hash,
-    ObjectLiteral,
-    safeJSONParse,
-    sortArrayOfObjectByPropFromArray,
-    sortBy,
-    sortObjKeysFromArray,
-} from "@pastable/core";
+import { AnyFunction, hash, ObjectLiteral, sortArrayOfObjectByPropFromArray, updateItem } from "@pastable/core";
 import { atom, useAtom } from "jotai";
-import { atomFamily, useAtomValue } from "jotai/utils";
+import { atomFamily } from "jotai/utils";
 import { useEffect, useRef } from "react";
 import { useMyPresence, usePresenceIsSynced } from "./usePresence";
-import { GameRoomClient, RoomClient, useSocketClient } from "./useSocketClient";
+import { RoomClient, useSocketClient } from "./useSocketClient";
 
 // TODO on un-sync(=ws disconnect), reset everything ?
 export const roomListAtom = atom([] as Array<AvailableRoom>);
@@ -51,8 +43,10 @@ export const useRoomState = <State extends ObjectLiteral = Room>(name: string) =
     const presence = useMyPresence();
     const isIn = room.clients.some((client) => client.id === presence.id);
 
-    const isPresenceSynced = usePresenceIsSynced();
     const emitter = useSocketEventEmitter();
+    const once = (event: string, cb: AnyFunction) => emitter.once(`rooms/${event}#${name}`, cb);
+
+    const isPresenceSynced = usePresenceIsSynced();
     const [isSynced, setRoomSynced] = useAtom(roomIsSyncedFamily(name));
 
     // Keep track of room.sync, if true this room will receive updates, else the user has not joined the room yet
@@ -63,8 +57,7 @@ export const useRoomState = <State extends ObjectLiteral = Room>(name: string) =
         let cleanup;
         if (isPresenceSynced) {
             const cb = () => setRoomSynced(true);
-            emitter.once("rooms/join#" + name, cb);
-            cleanup = () => emitter.off("rooms/join#" + name, cb);
+            cleanup = emitter.once("rooms/join#" + name, cb);
         } else {
             setRoomSynced(false);
         }
@@ -113,10 +106,15 @@ export const useRoomState = <State extends ObjectLiteral = Room>(name: string) =
     // Reset room with that name on deleted
     useSocketEvent("rooms/delete#" + name, () => setRoom(initialValue));
 
-    // Add clients on join
-    useSocketEvent("rooms/join#" + name, (newClient: Player) =>
-        setRoom((current) => ({ ...current, clients: current.clients.concat(newClient) }))
-    );
+    // Add (or update) clients on join
+    useSocketEvent<Player>("rooms/join#" + name, (newClient) => {
+        setRoom((current) => ({
+            ...current,
+            clients: current.clients.some((client) => client.id === newClient.id)
+                ? updateItem(current.clients, "id", newClient)
+                : current.clients.concat(newClient),
+        }));
+    });
 
     // Update room.clients when their presence is updated
     useSocketEvent<Array<Player>>("presence/list", (update) => {
@@ -142,39 +140,17 @@ export const useRoomState = <State extends ObjectLiteral = Room>(name: string) =
 
     console.log(room);
 
-    return { name: room.name, state: room.state as State, clients: room.clients, isIn, isSynced, ...roomClient };
+    return { name: room.name, state: room.state as State, clients: room.clients, isIn, isSynced, once, ...roomClient };
 };
 
-const makeSpecificRoomClient = (client: RoomClient, name: Room["name"]) => ({
+export const makeSpecificRoomClient = (client: RoomClient, name: Room["name"]) => ({
     ...client,
     get: () => client.get.apply(null, [name]) as void,
     join: () => client.join.apply(null, [name]) as void,
     create: () => client.create.apply(null, [name]) as void,
-    // TODO SetState fn ?
     update: (update: ObjectLiteral) => client.update.apply(null, [name, update]),
     leave: () => client.leave.apply(null, [name]) as void,
     delete: () => client.delete.apply(null, [name]) as void,
     relay: (msg: any) => client.relay.apply(null, [name, msg]) as void,
     broadcast: (msg: any) => client.broadcast.apply(null, [name, msg]) as void,
 });
-const makeSpecificGameRoomClient = (client: GameRoomClient, name: Room["name"]) => ({
-    ...makeSpecificRoomClient(client, name),
-    updateMeta: (update: ObjectLiteral) => client.updateMeta.apply(null, [name, update]) as void,
-});
-
-export const gameFamily = atomFamily(
-    (props: Room) => atom({ current: props }),
-    (a, b) => a.name === b.name
-);
-export const useGameRoomState = <State extends ObjectLiteral = Room>(name: string) => {
-    const gameRef = useAtomValue(gameFamily({ name, clients: [], state: {} }));
-    useSocketEvent("games/update#" + name, (update: Room & State) => (gameRef.current = update));
-
-    // TODO game.meta
-    // TODO reprrendre depuis repo platformer ref pas ref
-
-    const client = useSocketClient();
-    const gameClient = useConst(makeSpecificGameRoomClient(client.games, name));
-
-    return { ref: gameRef as { current: Room & State }, ...gameClient };
-};
